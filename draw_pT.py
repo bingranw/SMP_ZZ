@@ -8,7 +8,7 @@ from ROOT import *
 intLum = 150
 gROOT.SetBatch(1)
 
-with open('ROOTfiles.yml', 'r') as f_yml:
+with open('../../python/postprocessing/monoZ/ROOTfiles.yml', 'r') as f_yml:
     dict_yml = yaml.load(f_yml)
 
 
