@@ -39,7 +39,8 @@ with open(xsec_file, 'r') as f_yml:
 
 gROOT.SetBatch(1)
 TH1.SetDefaultSumw2()
-
+gStyle.SetPadTickX(1)
+gStyle.SetPadTickY(1)
 
 
 # ==================================================
@@ -49,6 +50,8 @@ def VarName(var_to_draw):
     name_dic = {
     'emulatedMET':'Emulated MET [GeV]',
     'Z_pt':'Dilepton pT [GeV]',
+    'dijet_Mjj': 'M_{jj} [GeV]',
+    'dijet_abs_delta_eta': '#Delta#eta_{jj}'
     }
     return name_dic[var_to_draw] if var_to_draw in name_dic else var_to_draw
 
@@ -184,9 +187,10 @@ def MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data=False):
     pad_stack.SetTopMargin(0.07)
     pad_stack.SetRightMargin(0.03)
     stk.Draw('hist')
-    stk.SetMinimum( 0.1 )
+    stk_min = 0.01
+    stk.SetMinimum( stk_min )
     hist_signal.Draw("same hist")
-    lg = pad_stack.BuildLegend(0.15, 0.80, 0.93, 0.92, "", "fNDC")
+    lg = pad_stack.BuildLegend(0.15, 0.78, 0.93, 0.88, "", "fNDC")
     lg.SetNColumns(4)
     lg.SetFillStyle(0)
     lg.SetBorderSize(0)
@@ -195,9 +199,9 @@ def MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data=False):
     # Data plot
     if draw_data:
         hist_data.Draw("EP Same")
-        std_max = 10 ** ( numpy.log10( max(hist_data.GetMaximum(),stk.GetMaximum()) ) * 1.2 )
+        std_max = 10 ** ( numpy.log10(stk_min) + numpy.log10( max(hist_data.GetMaximum(),stk.GetMaximum())/stk_min ) * 1.2 )
     else:
-        std_max = 10 ** ( numpy.log10( stk.GetMaximum() ) * 1.2 )
+        std_max = 10 ** ( numpy.log10(stk_min) + numpy.log10( stk.GetMaximum()/stk_min ) * 1.2 )
     stk.SetMaximum( std_max )
 
     # Put info on top
@@ -218,24 +222,33 @@ def MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data=False):
     pad_ratio.SetBottomMargin(0.25)
     pad_ratio.SetRightMargin(0.03)
 
-    sumMCErrors = stk.GetHistogram()
+    sumMCErrors = stk.GetHists()[0].Clone('sumMCErrors')
+    sumMCErrors.SetFillColorAlpha(kGray, 0.5)
+    sumMCErrors.SetMarkerSize(0)
+    if len(stk.GetHists()) > 1: 
+        map(sumMCErrors.Add, stk.GetHists()[1:])
+
     dataOverSumMC = hist_data.Clone('data_ov_MC')
     if draw_data:
         dataOverSumMC.Divide(sumMCErrors)
     for i in range(hist_data.GetNbinsX()+2): 
         dataOverSumMC.SetBinError(i, hist_data.GetBinError(i)/max(hist_data.GetBinContent(i), 1))
 
-    stk.GetXaxis().Copy(dataOverSumMC.GetXaxis())
-    dataOverSumMC.GetYaxis().SetTitle('Data / MC')
-    dataOverSumMC.GetYaxis().CenterTitle()
-    dataOverSumMC.GetYaxis().SetRangeUser(0.3, 1.7)
-    dataOverSumMC.GetYaxis().SetNdivisions(503)
-    dataOverSumMC.GetYaxis().SetTitleOffset(0.5)
-    dataOverSumMC.GetYaxis().SetTitleSize(dataOverSumMC.GetYaxis().GetTitleSize()*2.5)
-    dataOverSumMC.GetYaxis().SetLabelSize(dataOverSumMC.GetYaxis().GetLabelSize()*2.5)
-    dataOverSumMC.GetXaxis().SetTitleSize(dataOverSumMC.GetXaxis().GetTitleSize()*2.5)
-    dataOverSumMC.GetXaxis().SetLabelSize(dataOverSumMC.GetXaxis().GetLabelSize()*2.5)
-    dataOverSumMC.Draw()
+    sumMCErrors.Divide(sumMCErrors)
+
+    stk.GetXaxis().Copy(sumMCErrors.GetXaxis())
+    sumMCErrors.GetYaxis().SetTitle('Data / MC')
+    sumMCErrors.GetYaxis().CenterTitle()
+    sumMCErrors.GetYaxis().SetRangeUser(0.3, 1.7)
+    sumMCErrors.GetYaxis().SetNdivisions(503)
+    sumMCErrors.GetYaxis().SetTitleOffset(0.5)
+    sumMCErrors.GetYaxis().SetTitleSize(sumMCErrors.GetYaxis().GetTitleSize()*2.5)
+    sumMCErrors.GetYaxis().SetLabelSize(sumMCErrors.GetYaxis().GetLabelSize()*2.5)
+    sumMCErrors.GetXaxis().SetTitleSize(sumMCErrors.GetXaxis().GetTitleSize()*2.5)
+    sumMCErrors.GetXaxis().SetLabelSize(sumMCErrors.GetXaxis().GetLabelSize()*2.5)
+
+    sumMCErrors.Draw("E2")
+    dataOverSumMC.Draw("same")
 
     xaxis = dataOverSumMC.GetXaxis()
     line = TLine(xaxis.GetBinLowEdge(xaxis.GetFirst()), 1, xaxis.GetBinUpEdge(xaxis.GetLast()), 1)
@@ -250,7 +263,9 @@ def MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data=False):
 # ==================================================
 def CR_tmp(draw_data=False):
     cuts = [
-    '(lep_category==1 || lep_category==3)', 
+    # '(lep_category==1 || lep_category==3)', 
+    # '(lep_category!=1 && lep_category!=3)', 
+    '(lep_category==2)', 
     'abs(Z_mass-91.1876)<15',
     'abs(delta_R_ll)<2',
     'sca_balance>0.6',
@@ -272,49 +287,60 @@ def CR_tmp(draw_data=False):
     hist_data = MakeData(var_to_draw, cuts, nbins_h, xmin_h, xmax_h, draw_data)
     MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data)
 
-def Draw_nm1(draw_data=False):
+def Draw_nm1(var_to_draw, draw_data=False):
     dict_nm1 = {
+        "ngood_jets":           [0,     10,     10],
         "Z_mass":               [60,    120,    60],
         "Z_pt":                 [0,     1000,   50],
+        "Z_eta":                [-3,     3,      60],
         "met_pt":               [0,     500,    50],
         "sca_balance":          [0,     10,     50],
         "delta_R_ll":           [0.5,   2.5,    40],
-        "ngood_jets":           [0,     10,     10],
         "abs(delta_phi_ZMet)":  [0,     4,      40],
         "abs(delta_phi_j_met)": [0,     4,      40],
         "H_T":                  [0,     2000,   40],
         "CJV_Pt_Sum":           [0,     400,    40],
+        "x_Z":                  [0,     1,      20],
+        "x_jet20":              [0,     1,      20],
         "x_jet30":              [0,     1,      20],
-        "abs(dijet_Zep)":       [0,     5,      50],
+        "dijet_Zep":            [-5,     5,      50],
         "dijet_centrality_gg":  [0,     1,      20],
         "Jet_pt_Ratio":         [0,     1,      20],
         "lead_jet_pt":          [0,     500,    50],
+        "lead_jet_eta":         [-3,     3,      60],
         "trail_jet_pt":         [0,     500,    50],
-        "Jet_etas_multiplied":  [0,     20,     40]
+        "trail_jet_eta":        [-3,     3,      60],
+        "Jet_etas_multiplied":  [0,     20,     40],
+        "S_T_jets":             [0,     1,      20],
+        "S_T_hard":             [0,     1,      20]
     }
     cuts = [
     '(lep_category==1 || lep_category==3)', 
     'nhad_taus==0',
     'ngood_jets>=2',
     'ngood_bjets==0',
-    'abs(Z_mass-91.1876)<15',
+    'abs(Z_mass-91.1876)<10',
     'Z_pt>50',
-    'met_pt>50',
-    'sca_balance>0. && sca_balance<6.',
+    'met_pt>100',
+    # 'sca_balance>0. && sca_balance<10.',
     'delta_R_ll<2',
     'abs(delta_phi_ZMet)>1',
     'abs(delta_phi_j_met)>1',
+    'x_Z<0.5',
+    'x_jet20<0.75',
+    'x_jet30<0.75',
+    'S_T_hard>0.15',
+
     # 'H_T<1500',
     # 'CJV_Pt_Sum>0',
-    # 'x_jet30>0.1 && x_jet30<0.9',
+    'x_jet30>0.1 && x_jet30<0.8',
     # 'abs(dijet_Zep)<4',
     # 'dijet_centrality_gg>0',
     # 'Jet_pt_Ratio>0',
     'lead_jet_pt>70',
-    'trail_jet_pt>50',
-    'Jet_etas_multiplied>0'
+    'trail_jet_pt>40',
+    # 'Jet_etas_multiplied>0'
     ]
-    var_to_draw = 'delta_R_ll'
     cuts = [cut for cut in cuts if var_to_draw not in cut]
     xmin_h, xmax_h, nbins_h = dict_nm1[var_to_draw]
     region = "ll channel"
@@ -325,42 +351,60 @@ def Draw_nm1(draw_data=False):
     hist_data = MakeData(var_to_draw, cuts, nbins_h, xmin_h, xmax_h, draw_data)
     MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data)
 
-def Draw_VBS(draw_data=True):
-    dict_var = {
-        'dijet_Mjj' : [0, 1500, 15, ['dijet_Mjj<400']],
-        'dijet_abs_delta_eta' : [0, 10, 10, ['dijet_abs_delta_eta<2.4']]
-    }
+    stk.Delete()
+    hist_signal.Delete()
+    hist_data.Delete()
+
+
+def Draw_VBS(var_to_draw, draw_data=True):
+    # =================================================
+    # Drawing VBS Vars
+    # =================================================
     cuts = [
     '(lep_category==1 || lep_category==3)', 
+    # '(lep_category==3)', 
     'nhad_taus==0',
     'ngood_jets>=2',
     'ngood_bjets==0',
-    'abs(Z_mass-91.1876)<15',
+    'abs(Z_mass-91.1876)<10',
     'Z_pt>50',
     'met_pt>100',
-    'sca_balance>0. && sca_balance<6.',
+    # 'sca_balance>0. && sca_balance<10.',
     'delta_R_ll<2',
     'abs(delta_phi_ZMet)>1',
     'abs(delta_phi_j_met)>1',
-    'H_T<1500',
-    'CJV_Pt_Sum>0',
-    'x_jet30>0.1 && x_jet30<0.9',
-    'abs(dijet_Zep)<4',
-    'dijet_centrality_gg>0',
-    'Jet_pt_Ratio>0',
+    'x_Z<0.5',
+    'x_jet20<0.75',
+    'x_jet30<0.75',
+    'S_T_hard>0.15',
+
+    # 'H_T<1500',
+    # 'CJV_Pt_Sum>0',
+    'x_jet30>0.1 && x_jet30<0.8',
+    # 'abs(dijet_Zep)<4',
+    # 'dijet_centrality_gg>0',
+    # 'Jet_pt_Ratio>0',
     'lead_jet_pt>70',
-    'trail_jet_pt>50',
-    'Jet_etas_multiplied>0'
+    'trail_jet_pt>40',
+    # 'Jet_etas_multiplied>0'
     ]
-    var_to_draw = 'delta_R_ll'
+    dict_var = {
+        'dijet_Mjj' : [100, 1600, 30, ['dijet_Mjj<400']],
+        'dijet_abs_delta_eta' : [0, 10, 50, ['dijet_abs_delta_eta<2.4']]
+    }
     xmin_h, xmax_h, nbins_h, cut_add = dict_var[var_to_draw]
     region = "ll channel"
     save_name = "plots/VBS_%s.pdf" % var_to_draw
 
+    # cut_add=[]
     stk = MakeStack(var_to_draw, cuts, nbins_h, xmin_h, xmax_h)
     hist_signal = MakeSignal(var_to_draw, cuts, nbins_h, xmin_h, xmax_h)
     hist_data = MakeData(var_to_draw, cuts+cut_add, nbins_h, xmin_h, xmax_h, draw_data)
     MakePlot(stk, hist_signal, hist_data, region, save_name, draw_data)
+
+    stk.Delete()
+    hist_signal.Delete()
+    hist_data.Delete()
 
 
 # ==================================================
@@ -370,7 +414,40 @@ def main():
     prf = TProof.Open("lite://")
 
     # Draw_VBS(True)
-    Draw_nm1(False)
+    vars_nm1 = [
+    'ngood_jets',
+    'Z_mass',
+    'Z_pt',
+    'Z_eta',
+    'met_pt',
+    'sca_balance',
+    'delta_R_ll',
+    'abs(delta_phi_ZMet)',
+    'abs(delta_phi_j_met)',
+    'H_T',
+    'CJV_Pt_Sum',
+    'x_Z',
+    'x_jet20',
+    'x_jet30',
+    'dijet_Zep',
+    'dijet_centrality_gg',
+    'Jet_pt_Ratio',
+    'lead_jet_pt',
+    'lead_jet_eta',
+    'trail_jet_pt',
+    'trail_jet_eta',
+    # 'Jet_etas_multiplied',
+    'S_T_jets',
+    'S_T_hard',
+    ]
+    for var_to_draw in vars_nm1:
+        # Draw_nm1(var_to_draw, False)
+        pass
+
+    vars_VBS = ['dijet_Mjj', 'dijet_abs_delta_eta']
+    for var_to_draw in vars_VBS:
+        Draw_VBS(var_to_draw, True)
+        pass
 
     prf.Close()
     prf.Delete()
